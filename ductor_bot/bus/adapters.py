@@ -281,6 +281,8 @@ def from_task_result(result: TaskResult) -> Envelope:
             "parent_agent": result.parent_agent,
             "error": result.error,
             "task_folder": result.task_folder,
+            "review_required": result.review_required,
+            "execution_profile": result.execution_profile,
         },
     )
 
@@ -298,10 +300,19 @@ def _build_task_injection_prompt(result: TaskResult) -> str:
             f"Inform the user that the background task '{result.name}' failed "
             f"and suggest next steps."
         )
+    review_header = ""
+    if result.review_required:
+        review_header = (
+            "RAW RESULT PENDING PARENT REVIEW\n"
+            "This task matched a high-judgment execution profile. Do not present "
+            "the worker output as verified until you inspect it critically.\n\n"
+        )
     return (
         f"[BACKGROUND TASK COMPLETED: task_id='{task_id}' name='{result.name}']\n"
         f"Provider: {result.provider}/{result.model} | "
-        f"Duration: {result.elapsed_seconds:.0f}s\n\n"
+        f"Duration: {result.elapsed_seconds:.0f}s"
+        f"{' | profile: ' + result.execution_profile if result.execution_profile else ''}\n\n"
+        f"{review_header}"
         f"{result.result_text}\n\n"
         f"[END TASK RESULT]\n\n"
         f"Original task: {result.original_prompt}\n\n"

@@ -25,6 +25,26 @@ _TELEGRAM_FILES = Path(
 ).expanduser() / "workspace" / "telegram_files"
 
 
+def _load_ductor_env() -> None:
+    """Load Ductor .env for direct CLI/tool use without overriding env vars."""
+    env_path = Path(os.environ.get("DUCTOR_HOME", str(Path.home() / ".ductor"))).expanduser() / ".env"
+    if not env_path.exists():
+        return
+    try:
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
 def _transcribe_external(path: Path) -> dict:
     """Transcribe via the ``DUCTOR_TRANSCRIBE_COMMAND`` external hook (#66).
 
@@ -168,9 +188,24 @@ def _transcribe_whisper_cpp(path: Path) -> dict:
 
 
 def main() -> None:
+    _load_ductor_env()
     parser = argparse.ArgumentParser(description="Transcribe audio/voice to text")
-    parser.add_argument("--file", required=True, help="Path to audio file")
+    parser.add_argument("--file", help="Path to audio file")
+    parser.add_argument("--self-test", action="store_true", help="Print available transcription backends")
     args = parser.parse_args()
+
+    if args.self_test:
+        print(json.dumps({
+            "ductor_transcribe_command": bool(os.environ.get("DUCTOR_TRANSCRIBE_COMMAND")),
+            "openai_api_key": bool(os.environ.get("OPENAI_API_KEY")),
+            "whisper_cli": bool(shutil.which("whisper")),
+            "whisper_cpp_cli": bool(shutil.which("whisper-cli")),
+        }, ensure_ascii=False, indent=2))
+        return
+
+    if not args.file:
+        print(json.dumps({"error": "--file is required unless --self-test is used"}))
+        sys.exit(1)
 
     path = Path(args.file).resolve()
     if not path.is_relative_to(_TELEGRAM_FILES.resolve()):
@@ -198,8 +233,9 @@ def main() -> None:
     print(json.dumps({
         "error": "All transcription methods failed",
         "details": errors,
-        "hint": "Install openai (pip install openai) and set OPENAI_API_KEY, "
-        "or install whisper locally (pip install openai-whisper)",
+        "hint": "First check/set transcription.audio_command in config.json or "
+        "DUCTOR_TRANSCRIBE_COMMAND in ~/.ductor/.env. Otherwise set OPENAI_API_KEY "
+        "or install an existing local backend such as whisper / whisper-cli.",
     }, ensure_ascii=False, indent=2))
     sys.exit(1)
 

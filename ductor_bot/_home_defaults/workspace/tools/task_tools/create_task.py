@@ -17,6 +17,10 @@ Options:
                        interactive bypasses the concurrency cap so user
                        follow-ups stay responsive; background (default)
                        and batch respect it.
+    --profile NAME     Optional execution profile (lightweight|standard|high_judgment)
+    --allow-lightweight-model
+                       Explicitly allow mini/spark + low reasoning even when
+                       the prompt looks like architecture/source/code review.
 
 Environment variables DUCTOR_AGENT_NAME and DUCTOR_INTERAGENT_PORT are
 automatically set by the Ductor framework.
@@ -48,6 +52,8 @@ def main() -> None:
     model = ""
     thinking = ""
     priority = ""
+    execution_profile = ""
+    allow_lightweight_model = False
 
     # Parse named options
     while args:
@@ -73,6 +79,12 @@ def main() -> None:
                 )
                 sys.exit(1)
             args = args[2:]
+        elif args[0] == "--profile" and len(args) >= 2:
+            execution_profile = args[1]
+            args = args[2:]
+        elif args[0] == "--allow-lightweight-model":
+            allow_lightweight_model = True
+            args = args[1:]
         else:
             break
 
@@ -99,6 +111,10 @@ def main() -> None:
         body["thinking"] = thinking
     if priority:
         body["priority"] = priority
+    if execution_profile:
+        body["execution_profile"] = execution_profile
+    if allow_lightweight_model:
+        body["allow_lightweight_model"] = True
 
     # Propagate sender context so task results route back to the originating chat/topic
     chat_id = os.environ.get("DUCTOR_CHAT_ID", "")

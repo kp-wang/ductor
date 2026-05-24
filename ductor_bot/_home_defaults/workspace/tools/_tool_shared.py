@@ -7,9 +7,32 @@ duplicated in ``cron_tools/_shared.py`` and ``webhook_tools/_shared.py``.
 from __future__ import annotations
 
 import json
+import os
 import re
+import tempfile
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
+
+try:  # pragma: no cover - platform import branch
+    import fcntl
+except ImportError:
+    fcntl = None  # type: ignore[assignment]
+
+
+@contextmanager
+def locked_json(path: Path):
+    """Advisory lock for read-modify-write JSON tool operations."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    with lock_path.open("a+", encoding="utf-8") as lock_f:
+        if fcntl is not None:
+            fcntl.flock(lock_f, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            if fcntl is not None:
+                fcntl.flock(lock_f, fcntl.LOCK_UN)
 
 
 def sanitize_name(raw: str) -> str:
@@ -51,12 +74,34 @@ def load_collection_strict(path: Path, key: str) -> dict[str, Any]:
 
 
 def save_collection(path: Path, data: dict[str, Any]) -> None:
-    """Persist a JSON collection with stable formatting."""
+    """Persist a JSON collection with stable formatting and atomic replace."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(data, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    content = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_name, path)
+    finally:
+        if os.path.exists(tmp_name):
+            os.unlink(tmp_name)
+
+
+def update_collection(
+    path: Path,
+    key: str,
+    mutator: Callable[[dict[str, Any]], None],
+    *,
+    strict: bool = False,
+) -> dict[str, Any]:
+    """Lock, reload latest collection, mutate, and save atomically."""
+    with locked_json(path):
+        data = load_collection_strict(path, key) if strict and path.exists() else load_collection_or_default(path, key)
+        mutator(data)
+        save_collection(path, data)
+        return data
 
 
 def available_ids(items: list[dict[str, Any]], id_field: str = "id") -> list[str]:

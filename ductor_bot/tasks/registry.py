@@ -102,6 +102,8 @@ class TaskRegistry:
         thinking: str = "",
         tasks_dir: Path | None = None,
         priority: str = "",
+        execution_profile: str = "",
+        review_required: bool = False,
     ) -> TaskEntry:
         """Create a new task entry and persist it.
 
@@ -124,6 +126,8 @@ class TaskRegistry:
             tasks_dir=str(resolved_dir),
             thread_id=submit.thread_id,
             priority=normalise_priority(priority or submit.priority),
+            execution_profile=execution_profile,
+            review_required=review_required,
         )
         self._entries[task_id] = entry
 

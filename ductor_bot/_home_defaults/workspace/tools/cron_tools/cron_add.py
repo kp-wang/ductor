@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -28,7 +29,7 @@ from _shared import (
     read_user_timezone,
     render_cron_task_claude_md,
     sanitize_name,
-    save_jobs,
+    update_jobs,
 )
 
 _DEFAULT_INSTRUCTION = (
@@ -264,7 +265,6 @@ def main() -> None:
         sys.exit(1)
 
     data = load_jobs_or_default(JOBS_PATH)
-
     if any(j["id"] == name for j in data["jobs"]):
         print(json.dumps({"error": f"Job '{name}' already exists"}))
         sys.exit(1)
@@ -323,8 +323,18 @@ def main() -> None:
     if topic_id:
         job["topic_id"] = int(topic_id)
     job["transport"] = transport
-    data["jobs"].append(job)
-    save_jobs(JOBS_PATH, data)
+    def add_job(latest: dict) -> None:
+        if any(j["id"] == name for j in latest["jobs"]):
+            raise ValueError(f"Job '{name}' already exists")
+        latest["jobs"].append(job)
+
+    try:
+        update_jobs(JOBS_PATH, add_job)
+    except ValueError as exc:
+        if task_dir.exists():
+            shutil.rmtree(task_dir)
+        print(json.dumps({"error": str(exc)}))
+        sys.exit(1)
 
     # The CronObserver detects the mtime change and auto-schedules
 

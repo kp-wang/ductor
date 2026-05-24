@@ -283,6 +283,8 @@ class InternalAgentAPI:
             model_override=data.get("model") or "",
             thinking_override=data.get("thinking") or "",
             priority=normalise_priority(data.get("priority")),
+            execution_profile=data.get("execution_profile") or "",
+            allow_lightweight_model=bool(data.get("allow_lightweight_model", False)),
         )
 
         try:

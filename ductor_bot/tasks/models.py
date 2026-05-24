@@ -36,6 +36,8 @@ class TaskSubmit:
     model_override: str = ""
     thinking_override: str = ""
     priority: str = _DEFAULT_PRIORITY
+    execution_profile: str = ""
+    allow_lightweight_model: bool = False
 
 
 @dataclass(slots=True)
@@ -64,6 +66,8 @@ class TaskEntry:
     tasks_dir: str = ""  # Agent's tasks directory (for per-agent folder resolution)
     thread_id: int | None = None  # Forum topic ID (for routing results back to topic)
     priority: str = _DEFAULT_PRIORITY  # #79: interactive | background | batch
+    execution_profile: str = ""
+    review_required: bool = False
 
     def to_dict(self) -> dict[str, object]:
         d: dict[str, object] = {
@@ -92,6 +96,8 @@ class TaskEntry:
             "thinking": self.thinking,
             "tasks_dir": self.tasks_dir,
             "priority": self.priority,
+            "execution_profile": self.execution_profile,
+            "review_required": self.review_required,
         }
         if self.thread_id is not None:
             d["thread_id"] = self.thread_id
@@ -124,6 +130,8 @@ class TaskEntry:
             tasks_dir=d.get("tasks_dir", ""),
             thread_id=d.get("thread_id"),
             priority=normalise_priority(d.get("priority")),
+            execution_profile=d.get("execution_profile", ""),
+            review_required=bool(d.get("review_required", False)),
         )
 
 
@@ -155,3 +163,5 @@ class TaskResult:
     task_folder: str = ""
     original_prompt: str = ""
     thread_id: int | None = None
+    review_required: bool = False
+    execution_profile: str = ""

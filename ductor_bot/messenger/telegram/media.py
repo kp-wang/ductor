@@ -5,6 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import mimetypes
+import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -157,7 +161,61 @@ async def resolve_media_text(
     except (OSError, yaml.YAMLError):
         logger.warning("Index update failed", exc_info=True)
 
+    if info.original_type in ("voice", "audio"):
+        transcript, method, error = await _auto_transcribe_audio(info.path, workspace)
+        info = MediaInfo(
+            path=info.path,
+            media_type=info.media_type,
+            file_name=info.file_name,
+            caption=info.caption,
+            original_type=info.original_type,
+            transcript=transcript,
+            transcript_method=method,
+            transcript_error=error,
+        )
+
     return build_media_prompt(info, workspace)
+
+
+async def _auto_transcribe_audio(path: Path, workspace: Path) -> tuple[str | None, str | None, str | None]:
+    """Best-effort auto transcription for voice/audio Telegram media."""
+    tool = workspace / "tools" / "media_tools" / "transcribe_audio.py"
+    if not tool.is_file():
+        return None, None, f"transcription tool missing: {tool}"
+
+    try:
+        rel = path.relative_to(workspace)
+    except ValueError:
+        rel = path
+
+    def run() -> tuple[str | None, str | None, str | None]:
+        env = os.environ.copy()
+        env.setdefault("DUCTOR_HOME", str(workspace.parent))
+        try:
+            proc = subprocess.run(
+                [sys.executable, str(tool), "--file", str(rel)],
+                cwd=str(workspace),
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=300,
+                check=False,
+            )
+        except Exception as exc:  # pragma: no cover - defensive subprocess guard
+            return None, None, str(exc)
+        output = (proc.stdout or "").strip()
+        if proc.returncode != 0:
+            return None, None, (proc.stderr or output or f"exit={proc.returncode}")[:500]
+        try:
+            data = json.loads(output)
+        except json.JSONDecodeError:
+            return output, "plain_text", None
+        transcript = data.get("transcript")
+        if isinstance(transcript, str) and transcript.strip():
+            return transcript.strip(), str(data.get("method") or "unknown"), None
+        return None, None, str(data.get("error") or "transcription produced no transcript")[:500]
+
+    return await asyncio.to_thread(run)
 
 
 # ---------------------------------------------------------------------------

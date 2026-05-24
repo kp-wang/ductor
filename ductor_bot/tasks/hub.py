@@ -7,6 +7,7 @@ import contextlib
 import logging
 import time
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from ductor_bot.tasks.models import (
@@ -16,6 +17,7 @@ from ductor_bot.tasks.models import (
     TaskSubmit,
     normalise_priority,
 )
+from ductor_bot.tasks.policy import resolve_task_policy
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -189,6 +191,20 @@ class TaskHub:
         provider = submit.provider_override or ""
         model = submit.model_override or ""
         thinking = submit.thinking_override or ""
+        policy = resolve_task_policy(
+            prompt=submit.prompt,
+            name=submit.name,
+            provider=provider,
+            model=model,
+            thinking=thinking,
+            allow_lightweight_model=submit.allow_lightweight_model,
+        )
+        if not submit.execution_profile:
+            submit.execution_profile = policy.profile
+        if policy.model_override != model:
+            model = policy.model_override
+        if policy.thinking_override != thinking:
+            thinking = policy.thinking_override
 
         # Resolve per-agent tasks_dir for folder isolation
         agent_tasks_dir = self._agent_tasks_dirs.get(submit.parent_agent)
@@ -199,6 +215,8 @@ class TaskHub:
             thinking=thinking,
             tasks_dir=agent_tasks_dir,
             priority=priority,
+            execution_profile=submit.execution_profile,
+            review_required=policy.review_required,
         )
 
         # Build prompt with mandatory suffix
@@ -450,6 +468,7 @@ class TaskHub:
             request = AgentRequest(
                 prompt=prompt,
                 model_override=entry.model or None,
+                reasoning_effort_override=entry.thinking or None,
                 provider_override=entry.provider or None,
                 chat_id=entry.chat_id,
                 topic_id=entry.thread_id,
@@ -460,9 +479,33 @@ class TaskHub:
 
             # Pre-resolve effective provider/model so the entry is never empty
             eff_provider, eff_model = cli.resolve_provider(request)
+            policy = resolve_task_policy(
+                prompt=entry.original_prompt or prompt,
+                name=entry.name,
+                provider=eff_provider,
+                model=eff_model,
+                thinking=entry.thinking,
+            )
+            if policy.model_override and policy.model_override != eff_model:
+                request = replace(request, model_override=policy.model_override)
+                eff_provider, eff_model = cli.resolve_provider(request)
+                entry.model = eff_model
+            if policy.thinking_override and policy.thinking_override != entry.thinking:
+                entry.thinking = policy.thinking_override
+                request = replace(request, reasoning_effort_override=entry.thinking or None)
+            if policy.profile and not entry.execution_profile:
+                entry.execution_profile = policy.profile
+            if policy.review_required and not entry.review_required:
+                entry.review_required = True
             if eff_provider and not entry.provider:
                 self._registry.update_status(
-                    entry.task_id, "running", provider=eff_provider, model=eff_model
+                    entry.task_id,
+                    "running",
+                    provider=eff_provider,
+                    model=eff_model,
+                    thinking=entry.thinking,
+                    execution_profile=entry.execution_profile,
+                    review_required=entry.review_required,
                 )
                 entry.provider = eff_provider
                 entry.model = eff_model
@@ -522,6 +565,8 @@ class TaskHub:
                     task_folder=str(self._registry.task_folder(entry.task_id)),
                     original_prompt=entry.original_prompt,
                     thread_id=entry.thread_id,
+                    review_required=entry.review_required,
+                    execution_profile=entry.execution_profile,
                 )
             )
 
@@ -552,6 +597,8 @@ class TaskHub:
                         model=entry.model,
                         original_prompt=entry.original_prompt,
                         thread_id=entry.thread_id,
+                        review_required=entry.review_required,
+                        execution_profile=entry.execution_profile,
                     )
                 )
             raise
@@ -583,6 +630,8 @@ class TaskHub:
                         error=error_msg,
                         original_prompt=entry.original_prompt,
                         thread_id=entry.thread_id,
+                        review_required=entry.review_required,
+                        execution_profile=entry.execution_profile,
                     )
                 )
 
